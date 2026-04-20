@@ -1,97 +1,109 @@
+import sys
 import os
 import json
-import sys
-from mcp.server.fastmcp import FastMCP
+import requests
 
-# ✨ IA-chan
-mcp = FastMCP("HistoriaVarillas")
+# 🩹 Inyectamos el venv con múltiples estrategias~
+def _find_and_inject_venv():
+    candidates = []
 
-# 📂 rutas
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    # Estrategia 1: relativo al script
+    if getattr(sys, 'frozen', False):
+        script_dir = os.path.dirname(sys.executable)
+    else:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    candidates.append(os.path.join(script_dir, "venv", "Lib", "site-packages"))
+
+    # Estrategia 2: directorio de trabajo actual
+    cwd = os.getcwd()
+    candidates.append(os.path.join(cwd, "venv", "Lib", "site-packages"))
+
+    # Estrategia 3: ruta hardcodeada (fallback)
+    candidates.append(r"C:\Users\pc-00\Desktop\historia-mcp\venv\Lib\site-packages")
+
+    for path in candidates:
+        if os.path.exists(path) and path not in sys.path:
+            sys.path.insert(0, path)
+            return path
+    return None
+
+_injected = _find_and_inject_venv()
+
+# Intentamos importar MCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ModuleNotFoundError:
+    import traceback
+    sys.stderr.write(f"[ERROR] No se pudo importar mcp.\n")
+    sys.stderr.write(f"  __file__  = {os.path.abspath(__file__)}\n")
+    sys.stderr.write(f"  cwd       = {os.getcwd()}\n")
+    sys.stderr.write(f"  venv path = {_injected}\n")
+    sys.stderr.write(f"  sys.path  = {sys.path}\n")
+    raise
+
+# ╔══════════════════════════════════════════════════════╗
+# ║   ✨ Servidor MCP - Historia de Las Varillas ✨      ║
+# ║        🌸 Proyecto Las Varillas  🌸                  ║
+# ╚══════════════════════════════════════════════════════╝
+
+BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "fundacion.json")
 
+mcp = FastMCP("HistoriaVarillas")
 
-# 🧪 chequeo inicial (NO bloquea, pero explica TODO)
-def verificar_estado():
-    print("\n🔍 === VERIFICACIÓN INICIAL ===", file=sys.stderr)
-    print(f"📂 Buscando archivo en:\n{DATA_FILE}", file=sys.stderr)
-
-    if not os.path.exists(DATA_FILE):
-        print("\n❌ ERROR: archivo NO encontrado", file=sys.stderr)
-        print("💡 Posibles problemas:", file=sys.stderr)
-        print("   - No creaste 'fundacion.json'", file=sys.stderr)
-        print("   - Está en otra carpeta", file=sys.stderr)
-        print("   - Se llama distinto (ej: fundacion.json.txt)", file=sys.stderr)
-        print("   - Windows oculta extensiones", file=sys.stderr)
-
-        print("\n🛠️ SOLUCIÓN:", file=sys.stderr)
-        print("👉 Creá un archivo llamado EXACTAMENTE:", file=sys.stderr)
-        print("   fundacion.json", file=sys.stderr)
-        print("👉 Y ponelo en la MISMA carpeta que server.py\n", file=sys.stderr)
-        return
-
-    print("✅ Archivo encontrado", file=sys.stderr)
-
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            datos = json.load(f)
-
-        print("✅ JSON válido", file=sys.stderr)
-
-        # 🔍 validar contenido
-        campos = ["documento", "contenido", "autor", "tags"]
-        faltantes = [c for c in campos if c not in datos]
-
-        if faltantes:
-            print("\n⚠️ Faltan campos en el JSON:", file=sys.stderr)
-            print(f"👉 {faltantes}", file=sys.stderr)
-        else:
-            print("✅ Estructura completa", file=sys.stderr)
-
-    except json.JSONDecodeError:
-        print("\n❌ ERROR: JSON malformado", file=sys.stderr)
-        print("💡 Revisá:", file=sys.stderr)
-        print("   - Comas (,)", file=sys.stderr)
-        print("   - Llaves {}", file=sys.stderr)
-        print("   - Comillas \" \"", file=sys.stderr)
-
-    except Exception as e:
-        print(f"\n💥 Error inesperado: {e}", file=sys.stderr)
-
-    print("🔍 === FIN VERIFICACIÓN ===\n", file=sys.stderr)
-
-
-# 🎀 tool MCP
+# ─────────────────────────────────────────────
+# 📜 TOOL: Historia local
+# ─────────────────────────────────────────────
 @mcp.tool()
 def consultar_fundacion_las_varillas() -> str:
+    """
+    Consulta información histórica sobre la fundación de Las Varillas.
+    """
     try:
-        if not os.path.exists(DATA_FILE):
-            return (
-                "❌ No existe fundacion.json\n"
-                "👉 Crealo en la misma carpeta que server.py"
-            )
-
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             datos = json.load(f)
-
         return (
-            f"📄 Documento : {datos.get('documento','Sin título')}\n"
-            f"📝 Contenido : {datos.get('contenido','Sin contenido')}\n"
-            f"✍️ Autor     : {datos.get('autor','Desconocido')}\n"
-            f"🏷️ Tags      : {', '.join(datos.get('tags', []))}"
+            f"📄 Documento : {datos.get('documento', 'Sin título')}\n"
+            f"📝 Contenido : {datos.get('contenido', 'Sin contenido')}\n"
+            f"✍️  Autor     : {datos.get('autor', 'Desconocido')}\n"
+            f"🏷️  Tags      : {', '.join(datos.get('tags', []))}"
+        )
+    except FileNotFoundError:
+        return f"😿 ¡No encontré el archivo! Buscaba en: {DATA_FILE}"
+    except json.JSONDecodeError:
+        return "😵 ¡El fundacion.json está malformado!"
+    except Exception as e:
+        return f"💥 Error inesperado: {str(e)}"
+
+
+# ─────────────────────────────────────────────
+# 🤖 TOOL: Ollama
+# ─────────────────────────────────────────────
+@mcp.tool()
+def preguntar_a_ollama(prompt: str) -> str:
+    """
+    Usa un modelo local de Ollama para responder preguntas.
+    """
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "llama3",
+                "prompt": prompt,
+                "stream": False
+            }
         )
 
-    except json.JSONDecodeError:
-        return "😵 El JSON está roto. Revisá formato."
+        data = response.json()
+        return data.get("response", "Sin respuesta del modelo")
+
     except Exception as e:
-        return f"💥 Error: {str(e)}"
+        return f"Error llamando a Ollama: {str(e)}"
 
 
-# 🚀 arranque SIEMPRE
+# ─────────────────────────────────────────────
+# 🚀 RUN
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
-    verificar_estado()
-
-    print("🌸 Servidor MCP corriendo (aunque haya errores)", file=sys.stderr)
-    print("💡 Listo para recibir consultas...", file=sys.stderr)
-
     mcp.run(transport="stdio")
