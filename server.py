@@ -20,7 +20,7 @@ def _find_and_inject_venv():
     candidates.append(os.path.join(cwd, "venv", "Lib", "site-packages"))
 
     # Estrategia 3: ruta hardcodeada (fallback)
-    candidates.append(r"C:\Users\pc-00\Desktop\historia-mcp\venv\Lib\site-packages")
+    candidates.append(r"c:\Users\felipe\Downloads\historia-mcp\venv\Lib\site-packages")
 
     for path in candidates:
         if os.path.exists(path) and path not in sys.path:
@@ -50,6 +50,11 @@ except ModuleNotFoundError:
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "fundacion.json")
 
+def log(msg: str):
+    """Escribe logs a stderr para no romper el protocolo stdio de MCP."""
+    sys.stderr.write(f"[SERVER] {msg}\n")
+    sys.stderr.flush()
+
 mcp = FastMCP("HistoriaVarillas")
 
 # ─────────────────────────────────────────────
@@ -60,6 +65,7 @@ def consultar_fundacion_las_varillas() -> str:
     """
     Consulta información histórica sobre la fundación de Las Varillas.
     """
+    log("Llamada a herramienta: consultar_fundacion_las_varillas")
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             datos = json.load(f)
@@ -70,10 +76,13 @@ def consultar_fundacion_las_varillas() -> str:
             f"🏷️  Tags      : {', '.join(datos.get('tags', []))}"
         )
     except FileNotFoundError:
+        log(f"Error: Archivo no encontrado - {DATA_FILE}")
         return f"😿 ¡No encontré el archivo! Buscaba en: {DATA_FILE}"
     except json.JSONDecodeError:
+        log("Error: fundacion.json está malformado")
         return "😵 ¡El fundacion.json está malformado!"
     except Exception as e:
+        log(f"Error inesperado leyendo fundación: {str(e)}")
         return f"💥 Error inesperado: {str(e)}"
 
 
@@ -85,20 +94,23 @@ def preguntar_a_ollama(prompt: str) -> str:
     """
     Usa un modelo local de Ollama para responder preguntas.
     """
+    log(f"Llamada a herramienta: preguntar_a_ollama con prompt: {prompt[:50]}...")
     try:
         response = requests.post(
             "http://localhost:11434/api/generate",
             json={
-                "model": "llama3",
+                "model": "qwen3-vl:8b",
                 "prompt": prompt,
                 "stream": False
             }
         )
 
         data = response.json()
+        log("Respuesta recibida de Ollama exitosamente.")
         return data.get("response", "Sin respuesta del modelo")
 
     except Exception as e:
+        log(f"Error llamando a Ollama: {str(e)}")
         return f"Error llamando a Ollama: {str(e)}"
 
 
@@ -106,4 +118,5 @@ def preguntar_a_ollama(prompt: str) -> str:
 # 🚀 RUN
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
+    log("Iniciando servidor MCP en modo stdio...")
     mcp.run(transport="stdio")

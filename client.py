@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import sys
 import requests
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -8,11 +9,22 @@ from mcp.client.stdio import stdio_client
 # ─── Configuración ───────────────────────────────────────────────────────────
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-PYTHON_PATH = os.path.join(BASE_DIR, "venv", "Scripts", "python.exe")  # Windows
+PYTHON_PATH = sys.executable
 SERVER_SCRIPT = os.path.join(BASE_DIR, "server.py")
 
+# ─── Configuración de la IA ──────────────────────────────────────────────────
+IA_CONFIG_DIR = os.path.join(BASE_DIR, "ia_config")
+
+def leer_archivo_ia(nombre_archivo, default=""):
+    """Lee un archivo de configuración de texto si existe."""
+    ruta = os.path.join(IA_CONFIG_DIR, nombre_archivo)
+    if os.path.exists(ruta):
+        with open(ruta, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return default
+
 OLLAMA_URL  = "http://localhost:11434/api/chat"
-OLLAMA_MODEL = "llama3.1"  # Cambiá a "llama3.2" si tu PC tiene poca RAM
+OLLAMA_MODEL = leer_archivo_ia("model.txt", "qwen3-vl:8b")
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -67,6 +79,15 @@ async def main():
             print(f"Herramientas disponibles: {[t.name for t in tools_mcp]}\n")
 
             # 3. Bucle de conversación
+            # 3. Inicializar historial de conversación leyendo los archivos de configuración
+            nombre = leer_archivo_ia("nombre.txt", "Asistente Histórico")
+            personalidad = leer_archivo_ia("personalidad.txt", "Eres una IA amable.")
+            instrucciones = leer_archivo_ia("instrucciones.txt", "")
+            conocimiento = leer_archivo_ia("conocimiento.txt", "")
+            
+            system_prompt = f"Tu nombre es {nombre}.\n\nPersonalidad:\n{personalidad}\n\nInstrucciones:\n{instrucciones}\n\nConocimiento adicional y contexto:\n{conocimiento}"
+            messages = [{"role": "system", "content": system_prompt}]
+            
             while True:
                 pregunta = input("Vos: ").strip()
                 if pregunta.lower() in ("salir", "exit", "quit"):
@@ -75,7 +96,7 @@ async def main():
                 if not pregunta:
                     continue
 
-                messages = [{"role": "user", "content": pregunta}]
+                messages.append({"role": "user", "content": pregunta})
 
                 # 4. Bucle de razonamiento (agentic loop)
                 while True:
