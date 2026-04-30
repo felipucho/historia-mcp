@@ -36,17 +36,10 @@ def verificar_ollama() -> bool:
     except:
         return False
 
-def llamar_ollama(messages: list, tools: list = None) -> dict:
+def llamar_ollama(prompt: str) -> str:
     """
-    Envía una conversación a Ollama y devuelve la respuesta.
-    
-    Nota: Ollama's /api/chat no soporta tools nativamente.
-    Para function calling, usar /api/generate con prompts estructurados.
+    Envía un prompt a Ollama y devuelve la respuesta.
     """
-    # Convertir messages a un prompt estructurado para /api/generate
-    # ya que Ollama no soporta tools en /api/chat
-    prompt = _messages_a_prompt(messages)
-    
     payload = {
         "model": OLLAMA_MODEL,
         "prompt": prompt,
@@ -61,58 +54,14 @@ def llamar_ollama(messages: list, tools: list = None) -> dict:
         )
         response.raise_for_status()
         data = response.json()
+        return data.get("response", "").strip()
         
-        # Convertir respuesta de /api/generate al formato esperado
-        return {
-            "message": {
-                "content": data.get("response", ""),
-                "tool_calls": []  # Ollama no retorna tool_calls en /api/generate
-            }
-        }
     except requests.exceptions.Timeout:
-        print("⏱️ Ollama tardó demasiado. Intenta con un prompt más corto.")
-        return {"message": {"content": "Timeout", "tool_calls": []}}
+        return "⏱️ Ollama tardó demasiado. Intenta con un prompt más corto."
     except requests.exceptions.ConnectionError:
-        print(f"❌ No se puede conectar a Ollama en {OLLAMA_URL}")
-        return {"message": {"content": "Conexión rechazada", "tool_calls": []}}
+        return f"❌ No se puede conectar a Ollama en {OLLAMA_URL}"
     except Exception as e:
-        print(f"💥 Error: {str(e)}")
-        return {"message": {"content": str(e), "tool_calls": []}}
-
-
-def _messages_a_prompt(messages: list) -> str:
-    """Convierte un historial de mensajes a un prompt para /api/generate."""
-    prompt_parts = []
-    
-    for msg in messages:
-        role = msg.get("role")
-        content = msg.get("content", "")
-        
-        if role == "system":
-            prompt_parts.append(f"Sistema: {content}\n")
-        elif role == "user":
-            prompt_parts.append(f"Usuario: {content}\n")
-        elif role == "assistant":
-            prompt_parts.append(f"Asistente: {content}\n")
-        elif role == "tool":
-            prompt_parts.append(f"Herramienta: {content}\n")
-    
-    return "\n".join(prompt_parts) + "\nAsistente: "
-
-
-def herramientas_mcp_a_ollama(mcp_tools) -> list:
-    """Convierte las herramientas MCP al formato que entiende Ollama."""
-    ollama_tools = []
-    for tool in mcp_tools:
-        ollama_tools.append({
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description or "",
-                "parameters": tool.inputSchema or {"type": "object", "properties": {}},
-            },
-        })
-    return ollama_tools
+        return f"💥 Error: {str(e)}"
 
 
 # ─── Lógica principal ────────────────────────────────────────────────────────
@@ -142,7 +91,6 @@ async def main():
             # 2. Obtener herramientas disponibles del servidor
             tools_result = await session.list_tools()
             tools_mcp = tools_result.tools
-            tools_ollama = herramientas_mcp_a_ollama(tools_mcp)
 
             print(f"Herramientas disponibles: {[t.name for t in tools_mcp]}\n")
 
@@ -153,7 +101,6 @@ async def main():
             conocimiento = leer_archivo_ia("conocimiento.txt", "")
             
             system_prompt = f"Tu nombre es {nombre}.\n\nPersonalidad:\n{personalidad}\n\nInstrucciones:\n{instrucciones}\n\nConocimiento adicional y contexto:\n{conocimiento}"
-            messages = [{"role": "system", "content": system_prompt}]
             
             # 4. Bucle de conversación
             while True:
@@ -164,18 +111,44 @@ async def main():
                 if not pregunta:
                     continue
 
-                messages.append({"role": "user", "content": pregunta})
+                # 5. Decidir si necesitamos datos del JSON
+                print(f"\n[Buscando información...]")
+                
+                # Intentar leer datos del JSON
+                datos_json = None
+                try:
+                    resultado = await session.call_tool("consultar_fundacion_las_varillas", arguments={})
+                    if resultado.content:
+                        datos_json = resultado.content[0].text
+                except Exception as e:
+                    print(f"⚠️ No se pudo acceder a los datos: {e}")
 
-                # 5. Bucle de razonamiento (agentic loop)
-                print(f"\nIA: ", end="", flush=True)
-                respuesta = llamar_ollama(messages)
-                mensaje = respuesta.get("message", {})
-                contenido = mensaje.get('content', '(sin respuesta)').strip()
-                
-                print(contenido)
-                print()
-                
-                messages.append({"role": "assistant", "content": contenido})
+                # 6. Construir prompt con contexto
+                if datos_json:
+                    prompt = f"""{system_prompt}
+
+DATOS DEL ARCHIVO fundacion.json:
+{datos_json}
+
+---
+
+Usuario: {pregunta}
+
+Responde basándote en los datos proporcionados anteriormente. Si la pregunta no está relacionada con Las Varillas o con los datos disponibles, indica que no tienes información al respecto.
+
+Asistente:"""
+                else:
+                    prompt = f"""{system_prompt}
+
+---
+
+Usuario: {pregunta}
+
+Asistente:"""
+
+                # 7. Llamar a Ollama con el contexto
+                respuesta = llamar_ollama(prompt)
+                print(f"\nIA: {respuesta}\n")
 
 
 if __name__ == "__main__":
