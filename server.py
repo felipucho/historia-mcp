@@ -49,6 +49,8 @@ except ModuleNotFoundError:
 
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "fundacion.json")
+OLLAMA_MODEL = "llama3:latest"  # Modelo disponible en Ollama
+OLLAMA_URL = "http://localhost:11434"
 
 def log(msg: str):
     """Escribe logs a stderr para no romper el protocolo stdio de MCP."""
@@ -97,21 +99,29 @@ def preguntar_a_ollama(prompt: str) -> str:
     log(f"Llamada a herramienta: preguntar_a_ollama con prompt: {prompt[:50]}...")
     try:
         response = requests.post(
-            "http://localhost:11434/api/generate",
+            f"{OLLAMA_URL}/api/generate",
             json={
-                "model": "qwen3-vl:8b",
+                "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False
-            }
+            },
+            timeout=120
         )
+        response.raise_for_status()
 
         data = response.json()
         log("Respuesta recibida de Ollama exitosamente.")
         return data.get("response", "Sin respuesta del modelo")
 
+    except requests.exceptions.Timeout:
+        log(f"Timeout esperando respuesta de Ollama después de 120s")
+        return "⏱️ Ollama tardó demasiado en responder. Intenta con un prompt más corto."
+    except requests.exceptions.ConnectionError:
+        log(f"No se pudo conectar a Ollama en {OLLAMA_URL}")
+        return f"❌ No se puede conectar a Ollama en {OLLAMA_URL}. ¿Está corriendo?"
     except Exception as e:
         log(f"Error llamando a Ollama: {str(e)}")
-        return f"Error llamando a Ollama: {str(e)}"
+        return f"💥 Error llamando a Ollama: {str(e)}"
 
 
 # ─────────────────────────────────────────────
@@ -119,4 +129,6 @@ def preguntar_a_ollama(prompt: str) -> str:
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     log("Iniciando servidor MCP en modo stdio...")
+    log(f"Usando modelo: {OLLAMA_MODEL}")
+    log(f"Conectando a: {OLLAMA_URL}")
     mcp.run(transport="stdio")
