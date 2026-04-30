@@ -36,22 +36,39 @@ def verificar_ollama() -> bool:
     except:
         return False
 
-def llamar_ollama(messages: list, tools: list) -> dict:
-    """Envía una conversación a Ollama y devuelve la respuesta."""
+def llamar_ollama(messages: list, tools: list = None) -> dict:
+    """
+    Envía una conversación a Ollama y devuelve la respuesta.
+    
+    Nota: Ollama's /api/chat no soporta tools nativamente.
+    Para function calling, usar /api/generate con prompts estructurados.
+    """
+    # Convertir messages a un prompt estructurado para /api/generate
+    # ya que Ollama no soporta tools en /api/chat
+    prompt = _messages_a_prompt(messages)
+    
     payload = {
         "model": OLLAMA_MODEL,
-        "messages": messages,
-        "tools": tools,
+        "prompt": prompt,
         "stream": False,
     }
+    
     try:
         response = requests.post(
-            f"{OLLAMA_URL}/api/chat",
+            f"{OLLAMA_URL}/api/generate",
             json=payload,
             timeout=180  # 3 minutos para prompts largos
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        
+        # Convertir respuesta de /api/generate al formato esperado
+        return {
+            "message": {
+                "content": data.get("response", ""),
+                "tool_calls": []  # Ollama no retorna tool_calls en /api/generate
+            }
+        }
     except requests.exceptions.Timeout:
         print("⏱️ Ollama tardó demasiado. Intenta con un prompt más corto.")
         return {"message": {"content": "Timeout", "tool_calls": []}}
@@ -61,6 +78,26 @@ def llamar_ollama(messages: list, tools: list) -> dict:
     except Exception as e:
         print(f"💥 Error: {str(e)}")
         return {"message": {"content": str(e), "tool_calls": []}}
+
+
+def _messages_a_prompt(messages: list) -> str:
+    """Convierte un historial de mensajes a un prompt para /api/generate."""
+    prompt_parts = []
+    
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+        
+        if role == "system":
+            prompt_parts.append(f"Sistema: {content}\n")
+        elif role == "user":
+            prompt_parts.append(f"Usuario: {content}\n")
+        elif role == "assistant":
+            prompt_parts.append(f"Asistente: {content}\n")
+        elif role == "tool":
+            prompt_parts.append(f"Herramienta: {content}\n")
+    
+    return "\n".join(prompt_parts) + "\nAsistente: "
 
 
 def herramientas_mcp_a_ollama(mcp_tools) -> list:
@@ -130,54 +167,15 @@ async def main():
                 messages.append({"role": "user", "content": pregunta})
 
                 # 5. Bucle de razonamiento (agentic loop)
-                max_iterations = 10
-                iteration = 0
+                print(f"\nIA: ", end="", flush=True)
+                respuesta = llamar_ollama(messages)
+                mensaje = respuesta.get("message", {})
+                contenido = mensaje.get('content', '(sin respuesta)').strip()
                 
-                while iteration < max_iterations:
-                    iteration += 1
-                    respuesta = llamar_ollama(messages, tools_ollama)
-                    mensaje = respuesta.get("message", {})
-
-                    tool_calls = mensaje.get("tool_calls", [])
-
-                    # Si Ollama NO pide ninguna herramienta → respuesta final
-                    if not tool_calls:
-                        contenido = mensaje.get('content', '(sin respuesta)')
-                        print(f"\nIA: {contenido}\n")
-                        break
-
-                    # Si Ollama pide una herramienta → ejecutarla en el servidor MCP
-                    messages.append({"role": "assistant", "content": "", "tool_calls": tool_calls})
-
-                    for call in tool_calls:
-                        nombre_tool = call["function"]["name"]
-                        args   = call["function"].get("arguments", {})
-                        
-                        # Parsear argumentos si vienen como string
-                        if isinstance(args, str):
-                            try:
-                                args = json.loads(args) if args else {}
-                            except json.JSONDecodeError:
-                                args = {}
-
-                        print(f"[Usando herramienta: {nombre_tool}]")
-
-                        try:
-                            resultado = await session.call_tool(nombre_tool, arguments=args)
-                            contenido = resultado.content[0].text if resultado.content else "Sin resultado"
-                        except Exception as e:
-                            print(f"⚠️  Error ejecutando {nombre_tool}: {str(e)}")
-                            contenido = f"Error: {str(e)}"
-
-                        messages.append({
-                            "role": "tool",
-                            "content": contenido,
-                        })
-
-                    # Volver a enviar a Ollama con el resultado de la herramienta
+                print(contenido)
+                print()
                 
-                if iteration >= max_iterations:
-                    print("⚠️ Máximo de iteraciones alcanzado. Abortando agentic loop.\n")
+                messages.append({"role": "assistant", "content": contenido})
 
 
 if __name__ == "__main__":
